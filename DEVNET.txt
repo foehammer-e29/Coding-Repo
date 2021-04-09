@@ -1,2 +1,3 @@
 I will master Git today.
 This is a practice git change
+This is the second git change
