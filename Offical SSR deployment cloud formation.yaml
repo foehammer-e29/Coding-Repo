@@ -1,0 +1,267 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+    - Label:
+        default: Juniper Session Smart Conductor deployment
+      Parameters:
+      - ConductorName
+      - NodeName
+      - VpcId
+      - ControlSubnet
+      - ControlAllowedCidr
+      - InstanceType
+      - KeyName
+      - AdminAllowedCidr
+    ParameterLabels:
+      ConductorName:
+        default: The name to be configured for the Conductor.
+      NodeName:
+        default: The name to be configured for the node of the Conductor.
+      VpcId:
+        default: Into which VPC should the Conductor be deployed?
+      ControlSubnet:
+        default: To which existing public subnet should the Conductor's control interface
+          be attached?
+      ControlAllowedCidr:
+        default: What is the IP CIDR range of the control interfaces of the Routers
+          managed by the Conductor?
+      InstanceType:
+        default: To which instance type should Conductor be deployed?
+      KeyName:
+        default: Which IAM user key do you want to use?
+      AdminAllowedCidr:
+        default: Which IP CIDR range is allowed to SSH to the EC2 instance as well
+          as login to the Conductor's GUI?
+Mappings:
+  AWSRegionArch2AMI:
+    us-east-1:
+      hourly: ami-06d8d8669316d1009
+    us-gov-west-1:
+      hourly: ami-001f22dee777ce799
+    us-gov-east-1:
+      hourly: ami-0bc03c40dc1c1860d
+    us-east-2:
+      hourly: ami-027a0e15eb26e2e7d
+    us-west-1:
+      hourly: ami-0373745a47db0a74c
+    us-west-2:
+      hourly: ami-019f755205957f038
+    ca-central-1:
+      hourly: ami-010c55f62ebdc6bae
+    eu-central-1:
+      hourly: ami-01073f2b955f6ad0b
+    eu-west-1:
+      hourly: ami-0afe89fde00b33e89
+    eu-west-2:
+      hourly: ami-068b1be9fa4ef67f7
+    eu-west-3:
+      hourly: ami-01094d8a4ae725fd7
+    ap-southeast-1:
+      hourly: ami-04120d3710645cdb6
+    ap-southeast-2:
+      hourly: ami-0dcacd30b92bc9064
+    ap-south-1:
+      hourly: ami-08b85328c785c7084
+    ap-northeast-1:
+      hourly: ami-0960b33066c2fa1db
+    ap-northeast-2:
+      hourly: ami-047c3f678cedeac0e
+    sa-east-1:
+      hourly: ami-0d3235eb676d46ce3
+    eu-north-1:
+      hourly: ami-0742cdcc4d8036c98
+    ap-east-1:
+      hourly: ami-0d50a33fbd760982c
+    me-south-1:
+      hourly: ami-0b3bbf7c5addc2dc8
+    af-south-1:
+      hourly: ami-03ae7d283279961d0
+    eu-south-1:
+      hourly: ami-000ac09e7fb798d7c
+Parameters:
+  ConductorName:
+    Description: "[OPTIONAL] The name to be configured for the Conductor."
+    Type: String
+  NodeName:
+    Description: "[OPTIONAL] The name to be configured for the node of the Conductor."
+    Type: String
+  VpcId:
+    Description: Id of an existing VPC the Conductor should be deployed to.
+    Type: AWS::EC2::VPC::Id
+    ConstraintDescription: must be the id of an existing VPC.
+  AdminAllowedCidr:
+    Description: 'Source IP address range to be allowed for SSH and HTTPs access (e.g.,
+      access from anywhere: 0.0.0.0/0 which will expose the application publicly to
+      the Internet, or from specific IP address range with format x.x.x.x/x).'
+    Type: String
+    MinLength: '9'
+    MaxLength: '18'
+    AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+  KeyName:
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the instances.
+    Type: AWS::EC2::KeyPair::KeyName
+    ConstraintDescription: must be the name of an existing EC2 KeyPair.
+  ControlSubnet:
+    Description: Name of an existing public subnet to place the Conductor's control
+      interface.
+    Type: AWS::EC2::Subnet::Id
+    ConstraintDescription: must be the name of an existing public subnet in a VPC.
+  ControlAllowedCidr:
+    Description: 'Source IP address range of the routers to be allowed for the automatedProvisioner
+      connection (e.g., access from anywhere: 0.0.0.0/0 which will expose the application
+      publicly to the Internet, or from specific IP address range with format x.x.x.x/x).'
+    Type: String
+    MinLength: '9'
+    MaxLength: '18'
+    AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+  InstanceType:
+    Description: Conductor EC2 instance type
+    Type: String
+    Default: c5.xlarge
+    AllowedValues:
+    - t2.large
+    - t3.large
+    - c5.xlarge
+    - c5.2xlarge
+    - c5.4xlarge
+    - c5.9xlarge
+    - c5.12xlarge
+    - c5.18xlarge
+    - c5.24xlarge
+    - c5n.xlarge
+    - c5n.2xlarge
+    - c5n.4xlarge
+    - c5n.9xlarge
+    - c5n.18xlarge
+    ConstraintDescription: must be a valid EC2 instance type.
+Resources:
+  128TechnologyConductorSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allows SSH, HTTPs for mgmt and control connections from Routers
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: '22'
+        ToPort: '22'
+        CidrIp:
+          Ref: AdminAllowedCidr
+      - IpProtocol: tcp
+        FromPort: '443'
+        ToPort: '443'
+        CidrIp:
+          Ref: AdminAllowedCidr
+      - IpProtocol: tcp
+        FromPort: '930'
+        ToPort: '930'
+        CidrIp:
+          Ref: ControlAllowedCidr
+      - IpProtocol: tcp
+        FromPort: '4505'
+        ToPort: '4506'
+        CidrIp:
+          Ref: ControlAllowedCidr
+      VpcId:
+        Ref: VpcId
+      Tags:
+      - Key: Name
+        Value:
+          Ref: AWS::StackName
+  128TechnologyConductorControlNetworkInterface:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      GroupSet:
+      - Fn::GetAtt:
+        - 128TechnologyConductorSecurityGroup
+        - GroupId
+      SubnetId:
+        Ref: ControlSubnet
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Join:
+          - _
+          - - Ref: AWS::StackName
+            - Control
+  128TechnologyConductorEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+  128TechnologyConductorInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType:
+        Ref: InstanceType
+      KeyName:
+        Ref: KeyName
+      ImageId:
+        Fn::FindInMap:
+        - AWSRegionArch2AMI
+        - Ref: AWS::Region
+        - hourly
+      NetworkInterfaces:
+      - NetworkInterfaceId:
+          Ref: 128TechnologyConductorControlNetworkInterface
+        DeviceIndex: '0'
+      UserData:
+        Fn::Base64:
+          Fn::Join:
+          - ''
+          - - '{"router-name": "'
+            - Ref: ConductorName
+            - '","node-name": "'
+            - Ref: NodeName
+            - '", "version": "1.0", "mode": "conductor", "cloud-vendor": "aws"}
+
+              '
+      Tags:
+      - Key: Name
+        Value:
+          Ref: AWS::StackName
+  128TechnologyConductorEIPAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId:
+        Fn::GetAtt:
+        - 128TechnologyConductorEIP
+        - AllocationId
+      NetworkInterfaceId:
+        Ref: 128TechnologyConductorControlNetworkInterface
+    DependsOn:
+    - 128TechnologyConductorInstance
+    - 128TechnologyConductorEIP
+Outputs:
+  InstanceId:
+    Description: InstanceId of Conductor EC2 instance
+    Value:
+      Ref: 128TechnologyConductorInstance
+  InternalControlIPAddress:
+    Description: Internal IP address of the Conductor's control interface
+    Value:
+      Fn::GetAtt:
+      - 128TechnologyConductorControlNetworkInterface
+      - PrimaryPrivateIpAddress
+  ElasticControlIPAddress:
+    Description: External IP address of the Conductor's control interface
+    Value:
+      Ref: 128TechnologyConductorEIP
+  SSHLogin:
+    Description: SSH command to log into Conductor EC2 instance
+    Value:
+      Fn::Join:
+      - ''
+      - - ssh t128@
+        - Ref: 128TechnologyConductorEIP
+  HTTPSLogin:
+    Description: HTTPs URL to log into Conductor GUI
+    Value:
+      Fn::Join:
+      - ''
+      - - https://
+        - Ref: 128TechnologyConductorEIP
+  LoginUser:
+    Description: User to login to Conductor GUI and CLI
+    Value: admin

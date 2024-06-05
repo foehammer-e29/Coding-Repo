@@ -1,0 +1,309 @@
+Description:  For Deploying a SSR in a VPC. This template deploys a VPC, with a private, Public and Management (Public) subnet in one Availability Zones. It deploys an internet gatway and Route tables for the Public subnet.
+
+Parameters:
+  EnvironmentName:
+    Description: An environment name that is prefixed to resource names
+    Type: String
+  
+
+  VpcCIDR:
+    Description: Please enter the IP range (CIDR notation) for this VPC
+    Type: String
+    Default: 10.1.0.0/16
+
+  MgntSubnetCIDR:
+    Description: Please enter the IP range (CIDR notation) for the Management subnet in the Availability Zone
+    Type: String
+    Default: 10.1.0.0/24
+
+  LANSubnetCIDR:
+    Description: Please enter the IP range (CIDR notation) for the private subnet in the Availability Zone
+    Type: String
+    Default: 10.1.20.0/24
+
+  WANSubnetDICR:
+    Description: Please enter the IP range (CIDR notation) for the private subnet in the Availability Zone
+    Type: String
+    Default: 10.1.10.0/24
+
+  InstanceTypeParameter:
+    Type: String
+    Default: c5.xlarge
+    Description: Enter instance size. Default is c5.xlarge.
+  AMI:
+    Type: String
+    Default: ami-04dd4c0a37ef6683d
+    Description: The AMI to use.
+  Key:
+    Type: String
+    Description: The key used to access the instance.
+
+
+
+
+Resources:
+
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCIDR
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Ref EnvironmentName
+        - Key: CloudFormationStackID
+          Value: !Ref 'AWS::StackId'
+        - Key: Stack Name
+          Value: !Ref 'AWS::StackName'
+
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Ref EnvironmentName
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+
+  MgntSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      CidrBlock: !Ref MgntSubnetCIDR
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} MGNT Subnet (AZ1)
+
+  LANSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 0, !GetAZs  '' ]
+      CidrBlock: !Ref LANSubnetCIDR
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} LAN Subnet (AZ1)
+
+  WANSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      CidrBlock: !Ref WANSubnetDICR
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} WAN Subnet (AZ1)
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} Public Routes
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  MgntSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref MgntSubnet
+
+  WANSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref WANSubnet
+
+  SSRWANSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: "SSR-WAN-ingress-sg"
+      GroupDescription: "Security group with ingress for HTTPS and SSH rules as well as SSR ports"
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - CidrIp: 0.0.0.0/0
+          FromPort: 443
+          IpProtocol: tcp
+          ToPort: 443
+          Description: "Allow 443 HTTPS Traffic in"
+        - CidrIp: 0.0.0.0/0
+          FromPort: 22
+          IpProtocol: tcp
+          ToPort: 22
+          Description: "Allow SSH"
+        - CidrIp: 0.0.0.0/0
+          FromPort: 930
+          IpProtocol: tcp
+          ToPort: 930
+          Description: "Allow Conductor"
+        - CidrIp: 0.0.0.0/0
+          FromPort: 4505
+          IpProtocol: tcp
+          ToPort: 4506
+          Description: "Allow conductor"
+      Tags:
+        - Key: Name
+          Value: SSR WAN Security Group
+  
+  SSRMGNTSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: "SSR-MGNT-ingress-sg"
+      GroupDescription: "Security group with ingress for HTTPS and SSH rules for SSR MGNT"
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - CidrIp: 0.0.0.0/0
+          FromPort: 443
+          IpProtocol: tcp
+          ToPort: 443
+          Description: "Allow 443 HTTPS Traffic in"
+        - CidrIp: 0.0.0.0/0
+          FromPort: 22
+          IpProtocol: tcp
+          ToPort: 22
+          Description: "Allow SSH"
+      Tags:
+        - Key: Name
+          Value: SSR MGNT Security Group
+
+  SSRWANinterface:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      Description: SSW WAN Interface
+      SubnetId: !Ref WANSubnet
+      GroupSet: 
+        - !Ref SSRWANSecurityGroup
+      Tags: 
+        - Key: Name
+          Value: SSRWAN
+
+  SSRMGNTinterface:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      Description: SSW MGNT Interface
+      SubnetId: !Ref MgntSubnet
+      GroupSet:
+        - !Ref SSRMGNTSecurityGroup
+      Tags: 
+        - Key: Name
+          Value: SSRMGNT
+
+  SSRLANinterface:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      Description: SSW MGNT Interface
+      SubnetId: !Ref LANSubnet
+      Tags: 
+        - Key: Name
+          Value: SSRLAN
+
+  ElasticIPWAN:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: SSR-WAN
+
+  ElasticIPMGNT:
+    Type: AWS::EC2::EIP
+    Properties:
+      Tags:
+        - Key: Name
+          Value: SSR-MGMT
+
+  AllocateWANIP:
+    Type: AWS::EC2::EIPAssociation
+    DependsOn: ElasticIPWAN
+    Properties:
+      AllocationId:
+        Fn::GetAtt:
+          - ElasticIPWAN
+          - AllocationId
+      NetworkInterfaceId: !Ref SSRWANinterface
+  
+  AllocateMGNTIP:
+    Type: AWS::EC2::EIPAssociation
+    DependsOn: ElasticIPMGNT
+    Properties:
+      AllocationId:
+        Fn::GetAtt:
+          - ElasticIPMGNT
+          - AllocationId
+      NetworkInterfaceId: !Ref SSRMGNTinterface
+
+  SSREC2:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      ImageId: !Ref AMI
+      InstanceType:
+        Ref: InstanceTypeParameter
+      KeyName: !Ref Key
+      NetworkInterfaces:
+      - NetworkInterfaceId:
+          Ref: SSRMGNTinterface
+        DeviceIndex: '0'
+      - NetworkInterfaceId:
+          Ref: SSRWANinterface
+        DeviceIndex: '1'
+      - NetworkInterfaceId:
+          Ref: SSRLANinterface
+        DeviceIndex: '2'
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} SSR
+
+  
+
+      
+
+
+
+
+
+
+
+
+
+Outputs:
+  VPC:
+    Description: A reference to the created VPC
+    Value: !Ref VPC
+
+  PublicSubnets:
+    Description: A list of the public subnets
+    Value: !Join [ ",", [ !Ref MgntSubnet ]]
+
+  PrivateSubnets:
+    Description: A list of the private subnets
+    Value: !Join [ ",", [ !Ref LANSubnet ]]
+
+  MgntSubnet:
+    Description: A reference to the public subnet in the 1st Availability Zone
+    Value: !Ref MgntSubnet
+
+  LANSubnet:
+    Description: A reference to the private subnet in the 1st Availability Zone
+    Value: !Ref LANSubnet
+
+
+
+
